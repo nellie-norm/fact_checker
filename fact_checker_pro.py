@@ -618,7 +618,7 @@ def fact_check_claim_streaming(claim: str, placeholders: dict):
 def main():
     # Header
     st.markdown("## Fact Checker")
-    st.caption("Multi-model verification with web search")
+    st.caption("Enter a claim and three AI models will verify it using web search")
     
     # Check API keys
     has_anthropic = bool(os.environ.get("ANTHROPIC_API_KEY"))
@@ -634,7 +634,7 @@ def main():
     with st.form(key="claim_form"):
         claim = st.text_area(
             "Enter a claim to verify",
-            placeholder="e.g., The Great Wall of China is visible from space with the naked eye",
+            placeholder="Enter a claim to fact-check, e.g., 'The Great Wall of China is visible from space with the naked eye.'",
             height=68,
             label_visibility="collapsed"
         )
@@ -648,6 +648,23 @@ def main():
     st.caption(f"☁ {remaining} queries remaining today")
     
     if verify_btn and claim:
+        # Validate input - check for questions
+        claim_stripped = claim.strip()
+        
+        if claim_stripped.endswith("?"):
+            st.warning("This tool evaluates **claims**, not questions. Please rephrase as a statement.")
+            st.caption("For example, instead of *'Is the Great Wall visible from space?'* try *'The Great Wall is visible from space.'*")
+            st.stop()
+        
+        if len(claim_stripped) < 10:
+            st.warning("Please enter a more complete claim to verify.")
+            st.stop()
+        
+        if claim_stripped.lower().startswith(("what ", "who ", "where ", "when ", "why ", "how ", "is ", "are ", "do ", "does ", "can ", "could ", "would ", "should ")):
+            st.warning("This looks like a question. Please rephrase as a **claim** to fact-check.")
+            st.caption("For example: *'The Great Wall of China is visible from space with the naked eye.'*")
+            st.stop()
+        
         # Check rate limit
         if not check_rate_limit():
             st.error("Daily limit reached. This is a free demo — please try again tomorrow!")
