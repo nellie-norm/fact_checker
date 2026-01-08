@@ -8,7 +8,45 @@ import streamlit as st
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Optional
+from datetime import date
 import re
+
+
+# ============================================================================
+# Rate Limiting
+# ============================================================================
+
+DAILY_LIMIT = 20  # queries per day across all users
+
+@st.cache_resource
+def get_rate_limiter():
+    """Global counter that persists while app is running"""
+    return {"date": date.today().isoformat(), "count": 0}
+
+def check_rate_limit():
+    """Check if under daily limit"""
+    limiter = get_rate_limiter()
+    today = date.today().isoformat()
+    
+    # Reset if new day
+    if limiter["date"] != today:
+        limiter["date"] = today
+        limiter["count"] = 0
+    
+    return limiter["count"] < DAILY_LIMIT
+
+def increment_counter():
+    """Increment the daily counter"""
+    limiter = get_rate_limiter()
+    limiter["count"] += 1
+
+def get_remaining():
+    """Get remaining queries for today"""
+    limiter = get_rate_limiter()
+    today = date.today().isoformat()
+    if limiter["date"] != today:
+        return DAILY_LIMIT
+    return max(0, DAILY_LIMIT - limiter["count"])
 
 # ============================================================================
 # Page Config & Styling
@@ -605,7 +643,19 @@ def main():
         with col1:
             verify_btn = st.form_submit_button("Verify", type="primary", use_container_width=True)
     
+    # Show remaining queries
+    remaining = get_remaining()
+    st.caption(f"☁ {remaining} queries remaining today")
+    
     if verify_btn and claim:
+        # Check rate limit
+        if not check_rate_limit():
+            st.error("Daily limit reached. This is a free demo — please try again tomorrow!")
+            st.stop()
+        
+        # Increment counter before running
+        increment_counter()
+        
         st.markdown("---")
         
         # Model columns

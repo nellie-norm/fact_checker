@@ -1,6 +1,6 @@
 # Fact Checker
 
-Multi-model fact verification tool that queries Claude, GPT-4o, and Gemini simultaneously with real-time web search.
+Multi-model fact verification tool that queries Claude, GPT-4o, and Perplexity simultaneously with real-time web search.
 
 ## Setup
 
@@ -9,7 +9,7 @@ pip install -r requirements.txt
 
 export ANTHROPIC_API_KEY='sk-ant-...'
 export OPENAI_API_KEY='sk-...'
-export GOOGLE_API_KEY='...'
+export PERPLEXITY_API_KEY='pplx-...'
 
 streamlit run fact_checker_pro.py
 ```
@@ -34,7 +34,13 @@ streamlit run fact_checker_pro.py
 |-------|------------|
 | Claude | `web_search_20250305` tool |
 | GPT-4o | `web_search_preview` tool |
-| Gemini | Google Search grounding |
+| Perplexity | Native (built for search) |
+
+## API Keys
+
+- Anthropic: https://console.anthropic.com/
+- OpenAI: https://platform.openai.com/api-keys
+- Perplexity: https://www.perplexity.ai/settings/api
 
 ## Cost
 
