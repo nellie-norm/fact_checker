@@ -343,6 +343,11 @@ def parse_response(model: str, text: str, extracted_sources: list[str]) -> FactC
             lines = json_str.split("\n")
             json_str = "\n".join(lines[1:-1] if lines[-1].startswith("```") else lines[1:])
         
+        # Fix common JSON issues
+        # Remove trailing commas before } or ]
+        json_str = re.sub(r',\s*}', '}', json_str)
+        json_str = re.sub(r',\s*]', ']', json_str)
+        
         data = json.loads(json_str)
         
         sources = []
@@ -660,7 +665,18 @@ def main():
             st.warning("Please enter a more complete claim to verify.")
             st.stop()
         
-        if claim_stripped.lower().startswith(("what ", "who ", "where ", "when ", "why ", "how ", "is ", "are ", "do ", "does ", "can ", "could ", "would ", "should ")):
+        # Detect question patterns
+        question_starters = (
+            "what ", "who ", "where ", "when ", "why ", "how ",
+            "is ", "are ", "was ", "were ",
+            "do ", "does ", "did ",
+            "can ", "could ", "would ", "should ", "will ",
+            "have ", "has ", "had ",
+            "which ", "whose ",
+            "is there ", "are there ",
+            "tell me ", "explain ", "describe ",
+        )
+        if claim_stripped.lower().startswith(question_starters):
             st.warning("This looks like a question. Please rephrase as a **claim** to fact-check.")
             st.caption("For example: *'The Great Wall of China is visible from space with the naked eye.'*")
             st.stop()
