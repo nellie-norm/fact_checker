@@ -53,7 +53,7 @@ def get_remaining():
 # ============================================================================
 
 st.set_page_config(
-    page_title="Fact Checker",
+    page_title="Straight Facts",
     page_icon="✓",
     layout="wide",
     initial_sidebar_state="collapsed"
@@ -343,11 +343,11 @@ def parse_response(model: str, text: str, extracted_sources: list[str]) -> FactC
                 raw_response=""
             )
         
+        # Find JSON object - look for outermost { }
         start = text.find('{')
         end = text.rfind('}') + 1
-        if start != -1 and end > start:
-            json_str = text[start:end]
-        else:
+        
+        if start == -1 or end <= start:
             # No JSON found - try to use the text as reasoning
             return FactCheckResult(
                 model=model,
@@ -359,17 +359,47 @@ def parse_response(model: str, text: str, extracted_sources: list[str]) -> FactC
                 raw_response=text
             )
         
+        json_str = text[start:end]
+        
+        # Clean up the JSON string
         json_str = json_str.strip()
+        
+        # Remove markdown code blocks if present
         if json_str.startswith("```"):
             lines = json_str.split("\n")
             json_str = "\n".join(lines[1:-1] if lines[-1].startswith("```") else lines[1:])
         
         # Fix common JSON issues
-        # Remove trailing commas before } or ]
-        json_str = re.sub(r',\s*}', '}', json_str)
-        json_str = re.sub(r',\s*]', ']', json_str)
+        json_str = re.sub(r',\s*}', '}', json_str)  # trailing comma before }
+        json_str = re.sub(r',\s*]', ']', json_str)  # trailing comma before ]
         
-        data = json.loads(json_str)
+        # Try to parse
+        try:
+            data = json.loads(json_str)
+        except json.JSONDecodeError:
+            # Try fixing unescaped quotes in strings - common LLM issue
+            # This is a simple fix that works for many cases
+            fixed = re.sub(r'(?<!\\)"(?=\w)', '\\"', json_str)
+            try:
+                data = json.loads(fixed)
+            except:
+                # Last resort: try to extract fields manually with regex
+                data = {}
+                
+                verdict_match = re.search(r'"verdict"\s*:\s*"([^"]+)"', json_str)
+                if verdict_match:
+                    data["verdict"] = verdict_match.group(1)
+                
+                confidence_match = re.search(r'"confidence"\s*:\s*"([^"]+)"', json_str)
+                if confidence_match:
+                    data["confidence"] = confidence_match.group(1)
+                
+                reasoning_match = re.search(r'"reasoning"\s*:\s*"([^"]*(?:\\.[^"]*)*)"', json_str)
+                if reasoning_match:
+                    data["reasoning"] = reasoning_match.group(1).replace('\\"', '"')
+                
+                if not data:
+                    raise ValueError("Could not extract any fields")
         
         sources = []
         raw_sources = data.get("sources", [])
