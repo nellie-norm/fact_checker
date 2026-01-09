@@ -686,7 +686,7 @@ def fact_check_claim_streaming(claim: str, placeholders: dict):
 
 def main():
     # Header
-    st.markdown("## Straight Facts")
+    st.markdown("## straight facts")
     st.caption("Enter a claim and three AI models will verify it using web search")
     
     # Check API keys
