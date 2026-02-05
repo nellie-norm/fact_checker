@@ -56,7 +56,7 @@ st.set_page_config(
     page_title="Straight Facts",
     page_icon="✓",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="auto"
 )
 
 # Styling to match nellnorman.com (careful not to break icon fonts)
@@ -120,6 +120,120 @@ st.markdown("""
     header {display: none;}
 </style>
 """, unsafe_allow_html=True)
+
+
+# ============================================================================
+# API Key Management
+# ============================================================================
+
+def init_session_state():
+    """Initialize session state for API key management"""
+    if "key_mode" not in st.session_state:
+        st.session_state.key_mode = "free"  # "free" or "own"
+    if "user_anthropic_key" not in st.session_state:
+        st.session_state.user_anthropic_key = ""
+    if "user_openai_key" not in st.session_state:
+        st.session_state.user_openai_key = ""
+    if "user_perplexity_key" not in st.session_state:
+        st.session_state.user_perplexity_key = ""
+
+init_session_state()
+
+
+def get_api_key(key_name: str) -> str:
+    """Get API key - user-provided takes priority, then environment variable"""
+    if st.session_state.key_mode == "own":
+        user_key_map = {
+            "ANTHROPIC_API_KEY": st.session_state.user_anthropic_key,
+            "OPENAI_API_KEY": st.session_state.user_openai_key,
+            "PERPLEXITY_API_KEY": st.session_state.user_perplexity_key,
+        }
+        user_key = user_key_map.get(key_name, "")
+        if user_key:
+            return user_key
+    return os.environ.get(key_name, "")
+
+
+def using_own_keys() -> bool:
+    """Check if user is using their own API keys"""
+    return st.session_state.key_mode == "own"
+
+
+def has_any_user_keys() -> bool:
+    """Check if user has provided any API keys"""
+    return any([
+        st.session_state.user_anthropic_key,
+        st.session_state.user_openai_key,
+        st.session_state.user_perplexity_key,
+    ])
+
+
+def render_sidebar():
+    """Render the sidebar for API key configuration"""
+    with st.sidebar:
+        st.markdown("### API Keys")
+
+        # Mode selection
+        mode = st.radio(
+            "Choose how to access the service:",
+            options=["free", "own"],
+            format_func=lambda x: "Free tier (20 queries/day)" if x == "free" else "Use my own API keys (unlimited)",
+            index=0 if st.session_state.key_mode == "free" else 1,
+            key="key_mode_radio"
+        )
+        st.session_state.key_mode = mode
+
+        if mode == "own":
+            st.markdown("---")
+            st.caption("Enter your API keys below. Keys are stored only in your browser session.")
+
+            # Anthropic key
+            anthropic_key = st.text_input(
+                "Anthropic API Key",
+                value=st.session_state.user_anthropic_key,
+                type="password",
+                placeholder="sk-ant-...",
+                key="anthropic_input"
+            )
+            st.session_state.user_anthropic_key = anthropic_key
+
+            # OpenAI key
+            openai_key = st.text_input(
+                "OpenAI API Key",
+                value=st.session_state.user_openai_key,
+                type="password",
+                placeholder="sk-...",
+                key="openai_input"
+            )
+            st.session_state.user_openai_key = openai_key
+
+            # Perplexity key
+            perplexity_key = st.text_input(
+                "Perplexity API Key",
+                value=st.session_state.user_perplexity_key,
+                type="password",
+                placeholder="pplx-...",
+                key="perplexity_input"
+            )
+            st.session_state.user_perplexity_key = perplexity_key
+
+            # Status indicators
+            st.markdown("---")
+            st.caption("**Status:**")
+            if anthropic_key:
+                st.caption("✓ Claude ready")
+            if openai_key:
+                st.caption("✓ GPT-4o ready")
+            if perplexity_key:
+                st.caption("✓ Perplexity ready")
+
+            if not has_any_user_keys():
+                st.warning("Enter at least one API key to start.")
+        else:
+            st.markdown("---")
+            remaining = get_remaining()
+            st.caption(f"**{remaining}** of {DAILY_LIMIT} queries remaining today")
+            st.caption("Need more? Switch to 'Use my own API keys' above.")
 
 
 # ============================================================================
@@ -193,36 +307,43 @@ JSON array:"""
 # API Query Functions
 # ============================================================================
 
-def query_claude(claim: str) -> FactCheckResult:
+def query_claude(claim: str, api_key: str = None) -> FactCheckResult:
     """Query Claude with web search"""
     try:
         import anthropic
-        client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
-        
+        client = anthropic.Anthropic(api_key=api_key)
+
         response = client.messages.create(
             model="claude-3-5-haiku-20241022",
             max_tokens=4096,
             tools=[{"type": "web_search_20250305", "name": "web_search"}],
             messages=[{"role": "user", "content": FACT_CHECK_PROMPT.format(claim=claim)}]
         )
-        
+
         full_text = ""
         sources = []
-        
+
         if response.content:
             for block in response.content:
                 if hasattr(block, 'text') and block.text:
                     full_text += block.text
+                # Extract citations from text blocks
                 if hasattr(block, 'citations') and block.citations:
                     for citation in block.citations:
                         if hasattr(citation, 'url') and citation.url:
-                            sources.append(citation.url)
-        
-        if hasattr(response, 'citations') and response.citations:
-            for citation in response.citations:
-                if hasattr(citation, 'url') and citation.url:
-                    sources.append(citation.url)
-        
+                            source_info = {
+                                "url": citation.url,
+                                "title": getattr(citation, 'title', '') or '',
+                                "snippet": getattr(citation, 'cited_text', '') or ''
+                            }
+                            sources.append(source_info)
+
+        # Debug: log raw response to help diagnose issues
+        print(f"[DEBUG Claude] full_text length: {len(full_text)}")
+        print(f"[DEBUG Claude] sources count: {len(sources)}")
+        if full_text:
+            print(f"[DEBUG Claude] full_text preview: {full_text[:500]}")
+
         return parse_response("Claude", full_text, sources)
         
     except Exception as e:
@@ -230,11 +351,11 @@ def query_claude(claim: str) -> FactCheckResult:
                                reasoning="", error=str(e))
 
 
-def query_gpt(claim: str) -> FactCheckResult:
+def query_gpt(claim: str, api_key: str = None) -> FactCheckResult:
     """Query GPT with web search"""
     try:
         from openai import OpenAI
-        client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+        client = OpenAI(api_key=api_key)
         
         response = client.responses.create(
             model="gpt-4o",
@@ -260,19 +381,19 @@ def query_gpt(claim: str) -> FactCheckResult:
             full_text = response.output_text
         
         if not full_text:
-            return query_gpt_fallback(claim, "Empty response")
-        
+            return query_gpt_fallback(claim, "Empty response", api_key)
+
         return parse_response("GPT-4o", full_text, sources)
-        
+
     except Exception as e:
-        return query_gpt_fallback(claim, str(e))
+        return query_gpt_fallback(claim, str(e), api_key)
 
 
-def query_gpt_fallback(claim: str, original_error: str) -> FactCheckResult:
+def query_gpt_fallback(claim: str, original_error: str, api_key: str = None) -> FactCheckResult:
     """Fallback to regular GPT"""
     try:
         from openai import OpenAI
-        client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+        client = OpenAI(api_key=api_key)
         
         response = client.chat.completions.create(
             model="gpt-4o",
@@ -289,13 +410,13 @@ def query_gpt_fallback(claim: str, original_error: str) -> FactCheckResult:
                                reasoning="", error=f"{original_error}")
 
 
-def query_perplexity(claim: str) -> FactCheckResult:
+def query_perplexity(claim: str, api_key: str = None) -> FactCheckResult:
     """Query Perplexity - built for search-grounded answers"""
     try:
         from openai import OpenAI
-        
+
         client = OpenAI(
-            api_key=os.environ.get("PERPLEXITY_API_KEY"),
+            api_key=api_key,
             base_url="https://api.perplexity.ai"
         )
         
@@ -326,11 +447,29 @@ def query_perplexity(claim: str) -> FactCheckResult:
 # Response Parsing
 # ============================================================================
 
-def parse_response(model: str, text: str, extracted_sources: list[str]) -> FactCheckResult:
+def _convert_sources(extracted_sources: list) -> list:
+    """Convert extracted sources (strings or dicts) to SourceEvidence objects"""
+    results = []
+    for item in extracted_sources:
+        if isinstance(item, dict):
+            url = item.get("url", "")
+            if url:
+                results.append(SourceEvidence(
+                    url=url,
+                    title=item.get("title", ""),
+                    snippet=item.get("snippet", ""),
+                    supports=item.get("supports", True)
+                ))
+        elif isinstance(item, str) and item:
+            results.append(SourceEvidence(url=item))
+    return results
+
+
+def parse_response(model: str, text: str, extracted_sources: list) -> FactCheckResult:
     """Parse JSON response from any model"""
     try:
         text = text.strip()
-        
+
         # If empty response
         if not text:
             return FactCheckResult(
@@ -338,7 +477,7 @@ def parse_response(model: str, text: str, extracted_sources: list[str]) -> FactC
                 verdict="UNVERIFIABLE",
                 confidence="LOW",
                 reasoning="No response received from model.",
-                sources=[SourceEvidence(url=url) for url in extracted_sources if url],
+                sources=_convert_sources(extracted_sources),
                 error=None,
                 raw_response=""
             )
@@ -354,7 +493,7 @@ def parse_response(model: str, text: str, extracted_sources: list[str]) -> FactC
                 verdict="UNVERIFIABLE",
                 confidence="LOW",
                 reasoning=text[:500],
-                sources=[SourceEvidence(url=url) for url in extracted_sources if url],
+                sources=_convert_sources(extracted_sources),
                 error=None,
                 raw_response=text
             )
@@ -417,9 +556,21 @@ def parse_response(model: str, text: str, extracted_sources: list[str]) -> FactC
                     sources.append(SourceEvidence(url=src))
         
         existing_urls = {s.url for s in sources}
-        for url in extracted_sources:
-            if url and url not in existing_urls:
-                sources.append(SourceEvidence(url=url))
+        for item in extracted_sources:
+            # Handle both string URLs and dict sources
+            if isinstance(item, dict):
+                url = item.get("url", "")
+                if url and url not in existing_urls:
+                    sources.append(SourceEvidence(
+                        url=url,
+                        title=item.get("title", ""),
+                        snippet=item.get("snippet", ""),
+                        supports=item.get("supports", True)
+                    ))
+                    existing_urls.add(url)
+            elif isinstance(item, str) and item and item not in existing_urls:
+                sources.append(SourceEvidence(url=item))
+                existing_urls.add(item)
         
         # Handle caveats - might be string or list
         caveats_raw = data.get("caveats", "")
@@ -438,7 +589,7 @@ def parse_response(model: str, text: str, extracted_sources: list[str]) -> FactC
         
     except Exception as e:
         # Graceful fallback - use text as reasoning instead of showing error
-        sources = [SourceEvidence(url=url) for url in extracted_sources if url]
+        sources = _convert_sources(extracted_sources)
         
         # Try to extract verdict from text if possible
         text_lower = (text or "").lower()
@@ -550,7 +701,7 @@ def extract_claims(text: str) -> list[str]:
     """Extract claims using GPT"""
     try:
         from openai import OpenAI
-        client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+        client = OpenAI(api_key=get_api_key("OPENAI_API_KEY"))
         
         response = client.chat.completions.create(
             model="gpt-4o",
@@ -615,8 +766,13 @@ def render_model_card(placeholder, model_name: str, result: Optional[FactCheckRe
             else:
                 st.info(verdict_text)
             
-            # Reasoning - full text, sanitized
-            reasoning = result.reasoning.replace('`', '').replace('```', '')
+            # Reasoning - full text, sanitized (remove all markdown formatting)
+            reasoning = result.reasoning
+            # Remove backticks (inline code) - including unicode variants
+            reasoning = re.sub(r'[`\u0060\u2018\u2019\u201C\u201D]', '', reasoning)
+            # Remove markdown bold/italic
+            reasoning = reasoning.replace('**', '').replace('__', '')
+            reasoning = reasoning.replace('*', '').replace('_', ' ')
             st.caption(f"**{result.confidence}** · {reasoning}")
             
             # Sources - vertically stacked, full titles
@@ -630,36 +786,41 @@ def render_model_card(placeholder, model_name: str, result: Optional[FactCheckRe
 
 def fact_check_claim_streaming(claim: str, placeholders: dict):
     """Fact-check with streaming updates"""
-    
+
+    # Capture API keys in main thread before spawning workers
+    anthropic_key = get_api_key("ANTHROPIC_API_KEY")
+    openai_key = get_api_key("OPENAI_API_KEY")
+    perplexity_key = get_api_key("PERPLEXITY_API_KEY")
+
     queries = {}
-    
-    if os.environ.get("ANTHROPIC_API_KEY"):
-        queries["Claude"] = query_claude
+
+    if anthropic_key:
+        queries["Claude"] = (query_claude, anthropic_key)
         render_model_card(placeholders["Claude"], "Claude", loading=True)
     else:
         render_model_card(placeholders["Claude"], "Claude", result=None)
-    
-    if os.environ.get("OPENAI_API_KEY"):
-        queries["GPT-4o"] = query_gpt
+
+    if openai_key:
+        queries["GPT-4o"] = (query_gpt, openai_key)
         render_model_card(placeholders["GPT-4o"], "GPT-4o", loading=True)
     else:
         render_model_card(placeholders["GPT-4o"], "GPT-4o", result=None)
-    
-    if os.environ.get("PERPLEXITY_API_KEY"):
-        queries["Perplexity"] = query_perplexity
+
+    if perplexity_key:
+        queries["Perplexity"] = (query_perplexity, perplexity_key)
         render_model_card(placeholders["Perplexity"], "Perplexity", loading=True)
     else:
         render_model_card(placeholders["Perplexity"], "Perplexity", result=None)
-    
+
     if not queries:
         return [], {}
-    
+
     results = []
-    
+
     with ThreadPoolExecutor(max_workers=3) as executor:
         future_to_model = {
-            executor.submit(func, claim): model
-            for model, func in queries.items()
+            executor.submit(func, claim, api_key): model
+            for model, (func, api_key) in queries.items()
         }
         
         for future in as_completed(future_to_model):
@@ -685,18 +846,24 @@ def fact_check_claim_streaming(claim: str, placeholders: dict):
 # ============================================================================
 
 def main():
+    # Render sidebar first
+    render_sidebar()
+
     # Header
     st.markdown("## straight facts")
     st.caption("Enter a claim and three AI models will verify it using web search")
-    
-    # Check API keys
-    has_anthropic = bool(os.environ.get("ANTHROPIC_API_KEY"))
-    has_openai = bool(os.environ.get("OPENAI_API_KEY"))
-    has_perplexity = bool(os.environ.get("PERPLEXITY_API_KEY"))
-    
+
+    # Check API keys based on mode
+    has_anthropic = bool(get_api_key("ANTHROPIC_API_KEY"))
+    has_openai = bool(get_api_key("OPENAI_API_KEY"))
+    has_perplexity = bool(get_api_key("PERPLEXITY_API_KEY"))
+
     if not any([has_anthropic, has_openai, has_perplexity]):
-        st.error("No API keys configured. Set environment variables to continue.")
-        st.code("export ANTHROPIC_API_KEY='...'\nexport OPENAI_API_KEY='...'\nexport PERPLEXITY_API_KEY='...'")
+        if using_own_keys():
+            st.info("Enter your API keys in the sidebar to get started.")
+        else:
+            st.error("No API keys configured. Set environment variables or use your own keys in the sidebar.")
+            st.code("export ANTHROPIC_API_KEY='...'\nexport OPENAI_API_KEY='...'\nexport PERPLEXITY_API_KEY='...'")
         st.stop()
     
     # Single claim input (no tabs)
@@ -712,10 +879,13 @@ def main():
         with col1:
             verify_btn = st.form_submit_button("Verify", type="primary", use_container_width=True)
     
-    # Show remaining queries
-    remaining = get_remaining()
-    st.caption(f"☁ {remaining} queries remaining today")
-    
+    # Show remaining queries (only for free tier)
+    if using_own_keys():
+        st.caption("☁ Unlimited queries (using your API keys)")
+    else:
+        remaining = get_remaining()
+        st.caption(f"☁ {remaining} queries remaining today")
+
     if verify_btn and claim:
         # Validate input - check for questions
         claim_stripped = claim.strip()
@@ -757,13 +927,14 @@ def main():
             st.caption("For example: *'The Great Wall of China is visible from space with the naked eye.'*")
             st.stop()
         
-        # Check rate limit
-        if not check_rate_limit():
-            st.error("Daily limit reached. This is a free demo — please try again tomorrow!")
-            st.stop()
-        
-        # Increment counter before running
-        increment_counter()
+        # Check rate limit (only for free tier)
+        if not using_own_keys():
+            if not check_rate_limit():
+                st.error("Daily limit reached. Switch to 'Use my own API keys' in the sidebar for unlimited access, or try again tomorrow.")
+                st.stop()
+
+            # Increment counter before running
+            increment_counter()
         
         st.markdown("---")
         
