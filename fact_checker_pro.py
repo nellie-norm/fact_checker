@@ -970,9 +970,10 @@ def main():
                 "DISAGREEMENT": "✗"
             }
             verdict_display = verdict.replace("_", " ").title()
-            consensus_display = consensus.replace("_", " ").title()
-            
-            st.markdown(f"**{consensus_icons.get(consensus, '?')} {consensus_display}** · Majority: {verdict_display} ({analysis['agreement_level']:.0%})")
+            models = analysis["models_responding"]
+            agreeing = round(analysis["agreement_level"] * models)
+
+            st.markdown(f"**{consensus_icons.get(consensus, '?')} {verdict_display}** · {agreeing} of {models} models agree")
             
             # Evidence synthesis
             if analysis.get("all_sources"):
