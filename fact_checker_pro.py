@@ -626,13 +626,19 @@ def analyze_consensus(results: list[FactCheckResult]) -> dict:
                 "majority_verdict": "UNKNOWN", "verdict_breakdown": {},
                 "all_sources": [], "unique_caveats": [], "models_responding": 0}
     
-    verdicts = [r.verdict for r in valid]
+    confidence_weights = {"HIGH": 1.0, "MEDIUM": 0.66, "LOW": 0.33}
+
+    # Weight each verdict by confidence
+    weighted_counts = {}
     counts = {}
-    for v in verdicts:
-        counts[v] = counts.get(v, 0) + 1
-    
-    most_common = max(counts, key=counts.get)
-    agreement_pct = counts[most_common] / len(valid)
+    for r in valid:
+        w = confidence_weights.get(r.confidence, 0.5)
+        weighted_counts[r.verdict] = weighted_counts.get(r.verdict, 0) + w
+        counts[r.verdict] = counts.get(r.verdict, 0) + 1
+
+    total_weight = sum(weighted_counts.values())
+    most_common = max(weighted_counts, key=weighted_counts.get)
+    agreement_pct = weighted_counts[most_common] / total_weight if total_weight else 0
     
     all_sources = []
     seen_urls = set()
