@@ -971,9 +971,13 @@ def main():
             }
             verdict_display = verdict.replace("_", " ").title()
             models = analysis["models_responding"]
-            agreeing = round(analysis["agreement_level"] * models)
+            agreeing = analysis["verdict_breakdown"].get(verdict, 0)
+            confidence_pct = analysis["agreement_level"]
 
-            st.markdown(f"**{consensus_icons.get(consensus, '?')} {verdict_display}** · {agreeing} of {models} models agree")
+            if agreeing == models:
+                st.markdown(f"**{consensus_icons.get(consensus, '?')} {verdict_display}** · All {models} models agree ({confidence_pct:.0%} weighted confidence)")
+            else:
+                st.markdown(f"**{consensus_icons.get(consensus, '?')} {verdict_display}** · {agreeing} of {models} models agree ({confidence_pct:.0%} weighted confidence)")
             
             # Evidence synthesis
             if analysis.get("all_sources"):
